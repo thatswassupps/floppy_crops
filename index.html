@@ -37,6 +37,9 @@
 <body>
 <div id="gameWrapper">
   <canvas id="game"></canvas>
+  <input type="text" id="mobileNameInput" maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+    style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200px;opacity:0;pointer-events:none;z-index:10;
+    font-family:'Montserrat',sans-serif;font-size:16px;background:#1a1a1a;color:#fff;border:1px solid #d4b856;padding:10px;text-align:center">
 </div>
 <script>
 const canvas = document.getElementById('game');
@@ -80,6 +83,66 @@ frameSrcs.forEach((src, i) => {
   };
   img.src = src;
 });
+
+// ── SUPABASE LEADERBOARD ──
+const SUPABASE_URL = 'https://dpntjpvpzgsjhfsmfwix.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwbnRqcHZwemdzamhmc21md2l4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNzkwNDAsImV4cCI6MjA5MDg1NTA0MH0.UUxL54J5aheJGzY5g7-gK6oRVke9RfJKcxhOmpbvleQ';
+
+let leaderboardAllTime = [];
+let leaderboardMonthly = [];
+let submittingScore = false;
+let scoreSubmitted = false;
+let playerName = '';
+let nameInputActive = false;
+let cursorBlink = 0;
+let leaderboardTab = 'alltime'; // 'alltime' or 'monthly'
+let leaderboardLoaded = false;
+
+async function fetchLeaderboard() {
+  try {
+    // All-time top 10
+    var res1 = await fetch(SUPABASE_URL + '/rest/v1/scores?select=name,score,created_at&order=score.desc&limit=10', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (res1.ok) leaderboardAllTime = await res1.json();
+
+    // Monthly top 10 — first day of current month
+    var now = new Date();
+    var monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    var res2 = await fetch(SUPABASE_URL + '/rest/v1/scores?select=name,score,created_at&order=score.desc&limit=10&created_at=gte.' + monthStart, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (res2.ok) leaderboardMonthly = await res2.json();
+    leaderboardLoaded = true;
+  } catch (e) {
+    console.log('Leaderboard fetch error:', e);
+  }
+}
+
+async function submitScore(name, scoreVal) {
+  if (submittingScore) return;
+  submittingScore = true;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/scores', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ name: name.substring(0, 16) || 'anon', score: scoreVal })
+    });
+    scoreSubmitted = true;
+    fetchLeaderboard(); // refresh after submit
+  } catch (e) {
+    console.log('Score submit error:', e);
+  }
+  submittingScore = false;
+}
+
+// Fetch leaderboard on load
+fetchLeaderboard();
 
 let gameState = 'menu';
 let score = 0;
@@ -421,19 +484,133 @@ function jump() {
     pipes = []; bucketHats = []; particles = [];
     score = 0; pipeTimer = 60;
     bird.y = H * 0.45; bird.trail = [];
+    scoreSubmitted = false;
+    playerName = '';
   } else if (gameState === 'playing') {
     bird.vy = bird.jumpForce; bird.flapTimer = 15;
   } else if (gameState === 'dead') {
     if (frameCount - bird.deathFrame > 30) {
-      gameState = 'menu';
-      bird.y = H * 0.45; bird.vy = 0; bird.rotation = 0;
-      pipes = []; bucketHats = []; particles = [];
+      // Go to name input
+      nameInputActive = true;
+      gameState = 'nameinput';
+      playerName = '';
     }
+  } else if (gameState === 'leaderboard') {
+    gameState = 'menu';
+    bird.y = H * 0.45; bird.vy = 0; bird.rotation = 0;
+    pipes = []; bucketHats = []; particles = [];
   }
 }
 
-canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); jump(); });
+canvas.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  var rect = canvas.getBoundingClientRect();
+  var scaleX = W / rect.width;
+  var scaleY = H / rect.height;
+  var tx = (e.clientX - rect.left) * scaleX;
+  var ty = (e.clientY - rect.top) * scaleY;
+
+  if (gameState === 'nameinput') {
+    var mobileInput = document.getElementById('mobileNameInput');
+    // Tap submit button
+    if (canvas._submitBtn && tx >= canvas._submitBtn.x && tx <= canvas._submitBtn.x + canvas._submitBtn.w &&
+        ty >= canvas._submitBtn.y && ty <= canvas._submitBtn.y + canvas._submitBtn.h) {
+      if (playerName.trim() === '') playerName = 'anon';
+      submitScore(playerName, score);
+      nameInputActive = false;
+      gameState = 'leaderboard';
+      mobileInput.style.opacity = '0';
+      mobileInput.style.pointerEvents = 'none';
+      mobileInput.blur();
+      return;
+    }
+    // Tap skip
+    if (canvas._skipBtn && tx >= canvas._skipBtn.x && tx <= canvas._skipBtn.x + canvas._skipBtn.w &&
+        ty >= canvas._skipBtn.y && ty <= canvas._skipBtn.y + canvas._skipBtn.h) {
+      playerName = 'anon';
+      submitScore(playerName, score);
+      nameInputActive = false;
+      gameState = 'leaderboard';
+      mobileInput.style.opacity = '0';
+      mobileInput.style.pointerEvents = 'none';
+      mobileInput.blur();
+      return;
+    }
+    // Tap input box — focus mobile keyboard
+    if (canvas._inputBox && tx >= canvas._inputBox.x && tx <= canvas._inputBox.x + canvas._inputBox.w &&
+        ty >= canvas._inputBox.y && ty <= canvas._inputBox.y + canvas._inputBox.h) {
+      mobileInput.style.opacity = '0.01';
+      mobileInput.style.pointerEvents = 'auto';
+      mobileInput.value = playerName;
+      mobileInput.focus();
+      return;
+    }
+    return;
+  }
+
+  if (gameState === 'leaderboard') {
+    // Tab switching
+    if (canvas._tabAllTime && tx >= canvas._tabAllTime.x && tx <= canvas._tabAllTime.x + canvas._tabAllTime.w &&
+        ty >= canvas._tabAllTime.y && ty <= canvas._tabAllTime.y + canvas._tabAllTime.h) {
+      leaderboardTab = 'alltime';
+      return;
+    }
+    if (canvas._tabMonthly && tx >= canvas._tabMonthly.x && tx <= canvas._tabMonthly.x + canvas._tabMonthly.w &&
+        ty >= canvas._tabMonthly.y && ty <= canvas._tabMonthly.y + canvas._tabMonthly.h) {
+      leaderboardTab = 'monthly';
+      return;
+    }
+    jump();
+    return;
+  }
+
+  if (!nameInputActive) jump();
+});
+
+// Mobile input sync
+var mobileInput = document.getElementById('mobileNameInput');
+mobileInput.addEventListener('input', function() {
+  playerName = this.value.substring(0, 12);
+});
+mobileInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (playerName.trim() === '') playerName = 'anon';
+    submitScore(playerName, score);
+    nameInputActive = false;
+    gameState = 'leaderboard';
+    this.style.opacity = '0';
+    this.style.pointerEvents = 'none';
+    this.blur();
+  }
+});
+
 document.addEventListener('keydown', (e) => {
+  if (nameInputActive) {
+    if (e.key === 'Enter') {
+      // Submit score
+      if (playerName.trim() === '') playerName = 'anon';
+      submitScore(playerName, score);
+      nameInputActive = false;
+      gameState = 'leaderboard';
+      return;
+    }
+    if (e.key === 'Backspace') {
+      playerName = playerName.slice(0, -1);
+      return;
+    }
+    if (e.key === 'Escape') {
+      playerName = 'anon';
+      submitScore(playerName, score);
+      nameInputActive = false;
+      gameState = 'leaderboard';
+      return;
+    }
+    if (e.key.length === 1 && playerName.length < 12) {
+      playerName += e.key;
+    }
+    return;
+  }
   if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
 });
 
@@ -551,6 +728,11 @@ function draw() {
       ctx.font = '400 11px Montserrat';
       ctx.fillText(`best: ${highScore}. cool.`, W / 2, H * 0.82);
     }
+    if (leaderboardAllTime.length > 0) {
+      ctx.fillStyle = '#d4b856';
+      ctx.font = '700 10px Montserrat';
+      ctx.fillText('👑 ' + leaderboardAllTime[0].name.toLowerCase() + ': ' + leaderboardAllTime[0].score, W / 2, H * 0.86);
+    }
     ctx.fillStyle = '#555';
     ctx.font = '400 9px Montserrat';
     ctx.fillText('collect bucket hats. avoid stuff.', W / 2, H * 0.92);
@@ -576,6 +758,153 @@ function draw() {
     ctx.font = '400 11px Montserrat';
     ctx.fillText('tap to continue.', W / 2, H * 0.65);
   }
+
+  // ── NAME INPUT SCREEN ──
+  if (gameState === 'nameinput') {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 28px Montserrat';
+    ctx.textAlign = 'center';
+    ctx.fillText(score, W / 2, H * 0.22);
+
+    ctx.font = '400 12px Montserrat';
+    ctx.fillStyle = '#888';
+    ctx.fillText(currentDeathMsg, W / 2, H * 0.22 + 24);
+
+    ctx.fillStyle = '#d4b856';
+    ctx.font = '700 14px Montserrat';
+    ctx.fillText('enter your name.', W / 2, H * 0.38);
+    ctx.fillStyle = '#666';
+    ctx.font = '400 10px Montserrat';
+    ctx.fillText('or don\'t. we\'ll call you anon.', W / 2, H * 0.38 + 20);
+
+    // Name input box
+    var boxW = 220, boxH = 40;
+    var boxX = W / 2 - boxW / 2, boxY = H * 0.45;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = '#d4b856';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    cursorBlink++;
+    var displayName = playerName;
+    if (cursorBlink % 60 < 30) displayName += '|';
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 16px Montserrat';
+    ctx.textAlign = 'center';
+    ctx.fillText(displayName, W / 2, boxY + 26);
+
+    // Submit button
+    var btnY = boxY + boxH + 16;
+    ctx.fillStyle = '#d4b856';
+    ctx.fillRect(boxX, btnY, boxW, 36);
+    ctx.fillStyle = '#000';
+    ctx.font = '700 11px Montserrat';
+    ctx.fillText('submit. or whatever.', W / 2, btnY + 23);
+
+    // Skip button
+    var skipY = btnY + 48;
+    ctx.fillStyle = '#555';
+    ctx.font = '400 10px Montserrat';
+    ctx.fillText('skip →', W / 2, skipY);
+
+    // Store button positions for tap detection
+    canvas._submitBtn = { x: boxX, y: btnY, w: boxW, h: 36 };
+    canvas._skipBtn = { x: W / 2 - 30, y: skipY - 12, w: 60, h: 18 };
+    canvas._inputBox = { x: boxX, y: boxY, w: boxW, h: boxH };
+  }
+
+  // ── LEADERBOARD SCREEN ──
+  if (gameState === 'leaderboard') {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#d4b856';
+    ctx.font = '900 18px Montserrat';
+    ctx.textAlign = 'center';
+    ctx.fillText('leaderboard.', W / 2, 50);
+
+    // Tabs
+    var tabY = 75;
+    var tabW = 100;
+    // All-time tab
+    ctx.fillStyle = leaderboardTab === 'alltime' ? '#d4b856' : '#333';
+    ctx.fillRect(W / 2 - tabW - 4, tabY, tabW, 28);
+    ctx.fillStyle = leaderboardTab === 'alltime' ? '#000' : '#888';
+    ctx.font = '700 9px Montserrat';
+    ctx.fillText('all time', W / 2 - tabW / 2 - 4, tabY + 18);
+
+    // Monthly tab
+    ctx.fillStyle = leaderboardTab === 'monthly' ? '#d4b856' : '#333';
+    ctx.fillRect(W / 2 + 4, tabY, tabW, 28);
+    ctx.fillStyle = leaderboardTab === 'monthly' ? '#000' : '#888';
+    ctx.fillText('this month', W / 2 + tabW / 2 + 4, tabY + 18);
+
+    canvas._tabAllTime = { x: W / 2 - tabW - 4, y: tabY, w: tabW, h: 28 };
+    canvas._tabMonthly = { x: W / 2 + 4, y: tabY, w: tabW, h: 28 };
+
+    // Leaderboard entries
+    var entries = leaderboardTab === 'alltime' ? leaderboardAllTime : leaderboardMonthly;
+    var startY = tabY + 50;
+
+    if (!leaderboardLoaded) {
+      ctx.fillStyle = '#666';
+      ctx.font = '400 11px Montserrat';
+      ctx.fillText('loading...', W / 2, startY + 20);
+    } else if (entries.length === 0) {
+      ctx.fillStyle = '#666';
+      ctx.font = '400 11px Montserrat';
+      ctx.fillText('no scores yet. be the first.', W / 2, startY + 20);
+    } else {
+      entries.forEach(function(entry, i) {
+        var rowY = startY + i * 36;
+        var rankColors = ['#d4b856', '#c0c0c0', '#cd7f32'];
+        var isTop3 = i < 3;
+
+        // Highlight row
+        if (isTop3) {
+          ctx.fillStyle = 'rgba(212,184,86,0.06)';
+          ctx.fillRect(40, rowY - 12, W - 80, 32);
+        }
+
+        // Rank
+        ctx.fillStyle = rankColors[i] || '#555';
+        ctx.font = '900 13px Montserrat';
+        ctx.textAlign = 'left';
+        ctx.fillText((i + 1) + '.', 55, rowY + 8);
+
+        // Name
+        ctx.fillStyle = isTop3 ? '#fff' : '#999';
+        ctx.font = (isTop3 ? '700' : '400') + ' 12px Montserrat';
+        ctx.textAlign = 'left';
+        var displayN = (entry.name || 'anon').substring(0, 12).toLowerCase();
+        ctx.fillText(displayN, 90, rowY + 8);
+
+        // Score
+        ctx.fillStyle = isTop3 ? '#d4b856' : '#777';
+        ctx.font = '700 13px Montserrat';
+        ctx.textAlign = 'right';
+        ctx.fillText(entry.score, W - 55, rowY + 8);
+      });
+    }
+
+    // Your score
+    if (scoreSubmitted) {
+      ctx.fillStyle = '#555';
+      ctx.font = '400 10px Montserrat';
+      ctx.textAlign = 'center';
+      ctx.fillText('your score: ' + score + ' — submitted.', W / 2, H - 80);
+    }
+
+    ctx.fillStyle = '#666';
+    ctx.font = '400 11px Montserrat';
+    ctx.textAlign = 'center';
+    ctx.fillText('tap to play again.', W / 2, H - 45);
+  }
+
   ctx.restore();
 }
 
