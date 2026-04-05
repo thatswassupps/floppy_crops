@@ -144,6 +144,16 @@ async function submitScore(name, scoreVal) {
 // Fetch leaderboard on load
 fetchLeaderboard();
 
+// ── BACKGROUND MUSIC ──
+var bgMusic = new Audio('https://cdn.jsdelivr.net/gh/thatswassupps/audio@main/1.wav');
+bgMusic.loop = true;
+bgMusic.volume = 0.4;
+var musicStarted = false;
+function startMusic() {
+  if (musicStarted) return;
+  bgMusic.play().then(function() { musicStarted = true; }).catch(function(){});
+}
+
 let gameState = 'menu';
 let score = 0;
 let highScore = 0;
@@ -478,6 +488,7 @@ function checkBucketHats() {
 }
 
 function jump() {
+  startMusic();
   if (gameState === 'menu') {
     gameState = 'playing';
     bird.vy = bird.jumpForce; bird.flapTimer = 15;
