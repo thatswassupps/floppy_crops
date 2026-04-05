@@ -21,10 +21,10 @@
   }
   #gameWrapper {
     position: relative;
-    width: 100%;
+    width: min(100vw, calc(100vh * 9 / 16));
+    height: min(100vh, calc(100vw * 16 / 9));
     max-width: 420px;
-    aspect-ratio: 9/16;
-    max-height: 100vh;
+    max-height: calc(420px * 16 / 9);
   }
   canvas {
     display: block;
@@ -152,6 +152,14 @@ var musicStarted = false;
 function startMusic() {
   if (musicStarted) return;
   bgMusic.play().then(function() { musicStarted = true; }).catch(function(){});
+}
+
+// ── SOUND EFFECTS ──
+var sfxHat = new Audio('https://cdn.jsdelivr.net/gh/thatswassupps/audio@main/sound_effect_01.wav');
+sfxHat.volume = 0.6;
+function playHatSFX() {
+  sfxHat.currentTime = 0;
+  sfxHat.play().catch(function(){});
 }
 
 let gameState = 'menu';
@@ -480,6 +488,7 @@ function checkBucketHats() {
     const dx = bird.x - hat.x, dy = bird.y - hat.y;
     if (Math.sqrt(dx * dx + dy * dy) < 30) {
       score += 5;
+      playHatSFX();
       spawnParticles(hat.x, hat.y, '#ffffff', 12);
       return false;
     }
